@@ -57,6 +57,19 @@ rate-card:
   # 默认税率：建刊例版本时未单独指定税率用它（0.06 = 6%）；挂牌单价为未税价
   default-tax-rate: 0.06
 
+# 异常上报整改线
+rectify:
+  # 现场留证照片落盘根目录（库里只存相对路径；单子关闭前不允许删）
+  storage-root: ./data/rectify-photos
+  sla:
+    # 上报后处理期限（小时）：上报时刻 + 此时长 = deadline，拖过即逾期并抄送维护商主管
+    deadline-hours: 72
+    # 逾宽限（小时）：过 deadline 再拖这么久仍未销项，再抄送运营负责人
+    grace-hours: 48
+    # 逾期扫描间隔 / 启动后首次扫描延迟
+    scan-interval-ms: 300000
+    scan-initial-delay-ms: 30000
+
 mybatis-plus:
   mapper-locations: classpath*:mapper/**/*.xml
   type-aliases-package: com.evops

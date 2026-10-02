@@ -80,6 +80,7 @@
     <div class="tab" data-tab="geo">⑧ 坐标建档与捞点</div>
     <div class="tab" data-tab="rate">⑨ 年度刊例与报价</div>
     <div class="tab" data-tab="credit">⑩ 客户授信与回款</div>
+    <div class="tab" data-tab="rectify">⑪ 异常上报整改</div>
   </div>
 
   <!-- 点位挂牌 -->
@@ -432,6 +433,64 @@
     </div>
     <table id="occupationTable"></table>
   </div>
+
+  <!-- F6 异常上报与整改销项 -->
+  <div class="panel" id="panel-rectify">
+    <p class="muted">演示账号：巡查员 inspector1 / inspector1（现场上报、复勘）；维护商 vendor1 / vendor1（接单回传）；派单用 demo / demo。
+      照片可传可不传；复勘通过才销项；拖过期限（默认 72h）自动抄送维护商主管，再过 48h 抄送运营负责人；照片在单子关闭前不许删。</p>
+
+    <h3>巡查员现场上报（点位、类型必填，照片可传可不传）</h3>
+    <div class="grid">
+      <div><label>点位编号 *</label><input id="rtSiteNo" placeholder="已挂牌点位编号"></div>
+      <div><label>异常类型 *</label><select id="rtType">
+        <option value="EDGE_LIFT">EDGE_LIFT 牌面翘边</option>
+        <option value="PANEL_DAMAGE">PANEL_DAMAGE 画面破损</option>
+        <option value="LIGHT_FAULT">LIGHT_FAULT 亮灯故障</option>
+        <option value="STRUCTURE_RISK">STRUCTURE_RISK 结构隐患</option>
+        <option value="OTHER">OTHER 其他</option>
+      </select></div>
+      <div><label>严重程度</label><select id="rtSeverity"><option value="GENERAL">一般</option><option value="URGENT">紧急</option></select></div>
+      <div><label>处理期限（小时，留空默认 72）</label><input id="rtDeadline" type="number" min="1" placeholder="72"></div>
+      <div class="span2"><label>现场情况</label><input id="rtDesc" placeholder="三块牌面翘边，风一大哗啦响"></div>
+      <div><label>经手人（留空取登录人）</label><input id="rtOperator"></div>
+      <div><label>现场照片（可 0 张，可多选）</label><input id="rtPhotos" type="file" accept="image/*" multiple></div>
+    </div>
+    <div class="actions"><button onclick="reportRectify()">现场提交异常</button></div>
+
+    <h3>整改单翻查（点位历史异常 / 状态 / 只看逾期）</h3>
+    <div class="grid">
+      <div><label>点位编号</label><input id="qRtSite"></div>
+      <div><label>状态</label><select id="qRtStatus"><option value="">全部</option>
+        <option value="REPORTED">已上报待派单</option><option value="DISPATCHED">已派单待处理</option>
+        <option value="RETURNED">已回传待复勘</option><option value="REVIEW_REJECTED">复勘驳回待重处</option>
+        <option value="CLOSED">复勘通过已销项</option></select></div>
+      <div><label>单号（模糊）</label><input id="qRtNo" placeholder="RC…"></div>
+      <div style="align-self:end;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="gray" onclick="loadRectifies()">翻查</button>
+        <button class="gray" onclick="loadSiteHistory()">该点位历史异常</button>
+        <button class="warn" onclick="loadOverdueOnly()">只看逾期</button>
+        <button class="gray" onclick="scanOverdue()">手动扫逾期</button>
+      </div>
+    </div>
+    <table id="rectifyTable"></table>
+
+    <h3>单据处置（派单 → 回传 → 复勘销项）</h3>
+    <div class="grid">
+      <div><label>整改单号 *</label><input id="actRtNo" placeholder="RC…"></div>
+      <div><label>承接维护商（派单用）*</label><input id="actVendor" placeholder="京诚广告维护"></div>
+      <div><label>经手人（留空取登录人）</label><input id="actRtOperator"></div>
+      <div class="span2"><label>处理说明（回传必填）/ 复勘意见（驳回必填）</label><input id="actRtNote"></div>
+      <div><label>整改后照片（回传可附，可多选）</label><input id="actRtPhotos" type="file" accept="image/*" multiple></div>
+      <div style="align-self:end;display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="dispatchRectify()">系统派单</button>
+        <button class="gray" onclick="returnRectify()">处理回传</button>
+        <button onclick="passReview()">复勘通过销项</button>
+        <button class="warn" onclick="rejectReview()">复勘驳回</button>
+        <button class="gray" onclick="loadRectifyDetail()">查全档</button>
+      </div>
+    </div>
+    <div id="rectifyDetail" style="margin-top:10px"></div>
+  </div>
 </div>
 
 <script>
@@ -480,7 +539,7 @@ async function doLogin() {
 async function init() {
   // header 占位（登录后填充）
   document.body.insertAdjacentHTML('afterbegin',
-    '<header><h1>户外广告点位与上刊底账 <span class="muted" style="color:#c8d4e6">EVOPS f1·f2·f3·f4</span></h1><span class="who"></span></header>');
+    '<header><h1>户外广告点位与上刊底账 <span class="muted" style="color:#c8d4e6">EVOPS f1·f2·f3·f4·f5·f6</span></h1><span class="who"></span></header>');
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
     document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
     document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
@@ -488,6 +547,7 @@ async function init() {
     document.getElementById('panel-' + t.dataset.tab).classList.add('active');
     if (t.dataset.tab === 'rate') { loadRateCards(); }
     if (t.dataset.tab === 'credit') { loadCustomers(); loadPending(); }
+    if (t.dataset.tab === 'rectify') { loadRectifies(); }
   });
   document.getElementById('calPeriod').value = new Date().toISOString().slice(0, 7);
   try { const me = await call('GET', '/me'); showApp(me.username); loadSites(); loadSpecs(); } catch (e) { showLogin(); }
@@ -1212,6 +1272,144 @@ function exportOccupation(){
   const p=val('ocPeriod');
   if(!p){ toast('请填归属月 yyyy-MM'); return; }
   window.open('/api/credit/reports/occupation/export?period='+encodeURIComponent(p),'_blank');
+}
+
+// ===== F6 异常上报与整改销项 =====
+const RT_STATUS = {REPORTED:'已上报待派单',DISPATCHED:'已派单待处理',RETURNED:'已回传待复勘',REVIEW_REJECTED:'复勘驳回待重处',CLOSED:'复勘通过已销项'};
+const RT_TYPE = {EDGE_LIFT:'牌面翘边',PANEL_DAMAGE:'画面破损',LIGHT_FAULT:'亮灯故障',STRUCTURE_RISK:'结构隐患',OTHER:'其他'};
+function rtStatusTag(s){
+  const cls = {REPORTED:'pending',DISPATCHED:'processing',RETURNED:'kind',REVIEW_REJECTED:'failed',CLOSED:'success'}[s] || '';
+  return `<span class="tag ${cls}">${RT_STATUS[s]||esc(s)}</span>`;
+}
+function pickRectify(no){ document.getElementById('actRtNo').value=no; toast('已填整改单号 '+no,true); }
+function escRow(o){
+  const od = o.overdueFlag==='OVERDUE' ? ' <span class="tag failed">已逾期 L'+o.escalateLevel+'</span>' : '';
+  return `<tr class="${o.status==='CLOSED'?'closed':''}">
+    <td><a href="javascript:void(0)" onclick="pickRectify('${esc(o.rectifyNo)}')">${esc(o.rectifyNo)}</a></td>
+    <td>${esc(o.siteNo)}</td><td>${esc(o.siteDistrict)}</td><td>${RT_TYPE[o.issueType]||esc(o.issueType)}</td>
+    <td>${o.severity==='URGENT'?'紧急':'一般'}</td><td>${rtStatusTag(o.status)}${od}</td>
+    <td>${esc(o.reporterName)}</td><td>${esc(o.reportTime)}</td><td>${esc(o.deadline)}</td>
+    <td>${esc(o.vendor||'-')}</td><td>${o.photoCount}</td><td>v${o.versionNo}</td>
+    <td><button class="sm gray" onclick="document.getElementById('actRtNo').value='${esc(o.rectifyNo)}';loadRectifyDetail()">全档</button></td></tr>`;
+}
+function rectifyRows(list){
+  return '<tr><th>单号</th><th>点位</th><th>商圈</th><th>类型</th><th>紧急度</th><th>状态</th>'
+    + '<th>上报人</th><th>上报时刻</th><th>期限</th><th>维护商</th><th>留证</th><th>版本</th><th></th></tr>'
+    + list.map(escRow).join('') || '<tr><td class="muted">没有整改单</td></tr>';
+}
+async function postForm(url, fields, fileInput){
+  const fd = new FormData();
+  Object.entries(fields).forEach(([k,v])=>{ if(v!==undefined&&v!==null&&v!=='') fd.append(k,v); });
+  if (fileInput && fileInput.files) { for (const f of fileInput.files) fd.append('photos', f); }
+  const resp = await fetch(API + url, { method:'POST', body: fd });
+  if (resp.status === 401) { showLogin(); throw new Error('未登录'); }
+  const data = await resp.json();
+  if (!data.success) throw new Error(data.message || '请求失败');
+  return data.data;
+}
+async function reportRectify(){
+  if (!val('rtSiteNo') || !val('rtType')) { toast('点位编号和异常类型必填'); return; }
+  try {
+    const o = await postForm('/rectifies', {
+      siteNo: val('rtSiteNo'), issueType: val('rtType'), issueDesc: val('rtDesc'),
+      severity: val('rtSeverity'), deadlineHours: val('rtDeadline'), operatorName: val('rtOperator')
+    }, document.getElementById('rtPhotos'));
+    toast('异常已上报，整改单 ' + o.rectifyNo + '，期限 ' + o.deadline + '（照片 ' + o.photoCount + ' 张）', true);
+    document.getElementById('actRtNo').value = o.rectifyNo;
+    document.getElementById('rtPhotos').value = '';
+    loadRectifies();
+  } catch(e){ toast(e.message); }
+}
+async function loadRectifies(){
+  try {
+    const q = '?siteNo='+encodeURIComponent(val('qRtSite')||'')+'&status='+encodeURIComponent(val('qRtStatus')||'')
+      + '&rectifyNo='+encodeURIComponent(val('qRtNo')||'');
+    const list = await call('GET','/rectifies'+q);
+    document.getElementById('rectifyTable').innerHTML = rectifyRows(list);
+  } catch(e){ toast(e.message); }
+}
+async function loadSiteHistory(){
+  const no = val('qRtSite'); if(!no){ toast('请填点位编号'); return; }
+  try {
+    const list = await call('GET','/rectifies/sites/'+encodeURIComponent(no)+'/history');
+    document.getElementById('rectifyTable').innerHTML = rectifyRows(list);
+    toast('点位 '+no+' 历史异常 '+list.length+' 条（含已销项）', true);
+  } catch(e){ toast(e.message); }
+}
+async function loadOverdueOnly(){
+  try {
+    const list = await call('GET','/rectifies?overdueOnly=true');
+    document.getElementById('rectifyTable').innerHTML = rectifyRows(list);
+    toast('逾期未销项 '+list.length+' 条', list.length===0);
+  } catch(e){ toast(e.message); }
+}
+async function scanOverdue(){
+  try {
+    const r = await call('GET','/rectifies/overdue/scan');
+    toast('扫描完成：在办 '+r.openCount+' 单，本次新抄送 '+r.escalated.length+' 条'
+      + (r.escalated.length ? '（'+r.escalated.map(e=>e.rectifyNo+'→'+e.targetName).join('；')+'）' : ''), true);
+    loadRectifies();
+  } catch(e){ toast(e.message); }
+}
+async function dispatchRectify(){
+  try {
+    const o = await call('POST','/rectifies/'+encodeURIComponent(val('actRtNo'))+'/dispatch',
+      { vendor: val('actVendor'), operatorName: val('actRtOperator') });
+    toast('已派单给 '+o.vendor+'，单据进入已派单待处理', true); loadRectifies();
+  } catch(e){ toast(e.message); }
+}
+async function returnRectify(){
+  try {
+    const o = await postForm('/rectifies/'+encodeURIComponent(val('actRtNo'))+'/return',
+      { finishNote: val('actRtNote'), operatorName: val('actRtOperator') },
+      document.getElementById('actRtPhotos'));
+    toast('处理结果已回传（整改照片 '+o.photoCount+' 张在档），待复勘', true);
+    document.getElementById('actRtPhotos').value=''; loadRectifies();
+  } catch(e){ toast(e.message); }
+}
+async function passReview(){
+  try {
+    const o = await call('POST','/rectifies/'+encodeURIComponent(val('actRtNo'))+'/review-pass',
+      { comment: val('actRtNote'), operatorName: val('actRtOperator') });
+    toast('复勘通过，'+o.rectifyNo+' 已销项；留证照片随单封存不许删', true); loadRectifies(); loadRectifyDetail();
+  } catch(e){ toast(e.message); }
+}
+async function rejectReview(){
+  try {
+    await call('POST','/rectifies/'+encodeURIComponent(val('actRtNo'))+'/review-reject',
+      { comment: val('actRtNote'), operatorName: val('actRtOperator') });
+    toast('已复勘驳回，退回维护商重处', true); loadRectifies();
+  } catch(e){ toast(e.message); }
+}
+async function loadRectifyDetail(){
+  const no = val('actRtNo'); if(!no){ toast('请填整改单号'); return; }
+  try {
+    const d = await call('GET','/rectifies/'+encodeURIComponent(no));
+    const o = d.order;
+    const photos = (d.photos||[]).length
+      ? '<table><tr><th>阶段</th><th>文件</th><th>大小</th><th>留存</th><th>上传人</th><th>时刻</th><th></th></tr>'
+        + d.photos.map(p=>`<tr><td>${p.phase==='REPORT'?'上报留证':'整改回传'}</td>
+          <td>${esc(p.fileName)}</td><td>${(p.fileSize/1024).toFixed(1)} KB</td>
+          <td>${p.retainStatus==='KEPT'?'<span class="tag success">在单留证</span>':'<span class="tag down">已归档</span>'}</td>
+          <td>${esc(p.uploaderName)}</td><td>${esc(p.uploadTime)}</td>
+          <td><a href="${API}/rectifies/photos/${p.id}/download?inline=true" target="_blank"><button class="sm" type="button">查看</button></a></td></tr>`).join('')
+        + '</table>'
+      : '<p class="muted">本单未附照片（上报允许无照片）</p>';
+    const events = '<table><tr><th>#</th><th>动作</th><th>版本</th><th>前状态</th><th>后状态</th><th>经手人</th><th>时刻</th><th>说明</th></tr>'
+      + d.events.map((e,i)=>`<tr><td>${i+1}</td><td>${({REPORT:'现场上报',DISPATCH:'整改派单',RETURN:'处理回传',REVIEW_PASS:'复勘通过销项',REVIEW_REJECT:'复勘驳回',OVERDUE_ESCALATE:'逾期抄送升级',PHOTO_ARCHIVE:'照片归档'})[e.eventType]||esc(e.eventType)}</td>
+        <td>v${e.versionNo}</td><td>${RT_STATUS[e.fromStatus]||'—'}</td><td>${RT_STATUS[e.toStatus]||'—'}</td>
+        <td>${esc(e.operatorName)}</td><td>${esc(e.eventTime)}</td><td>${esc(e.detail)}</td></tr>`).join('') + '</table>';
+    const escs = (d.escalations||[]).length
+      ? '<h3>逾期自动抄送记录</h3><table><tr><th>层级</th><th>抄送对象</th><th>阶段</th><th>期限</th><th>抄送时刻</th><th>原因</th></tr>'
+        + d.escalations.map(x=>`<tr><td>L${x.levelNo}</td><td>${esc(x.targetName)}</td>
+          <td>${x.overdueStage==='OVERDUE'?'逾首限':'逾宽限'}</td><td>${esc(x.deadlineAt)}</td>
+          <td>${esc(x.escalateTime)}</td><td>${esc(x.reason)}</td></tr>`).join('') + '</table>'
+      : '';
+    document.getElementById('rectifyDetail').innerHTML =
+      `<p>单号 <b>${esc(o.rectifyNo)}</b> ｜ 点位 ${esc(o.siteNo)} ｜ ${RT_TYPE[o.issueType]||esc(o.issueType)}
+        ｜ ${rtStatusTag(o.status)} ｜ 期限 ${esc(o.deadline)} ｜ 维护商 ${esc(o.vendor||'未派')} ｜ 留证 ${o.photoCount} 张</p>
+      <h3>留证照片（关闭前不许删）</h3>${photos}<h3>异常上报版本与事件留底</h3>${events}${escs}`;
+  } catch(e){ toast(e.message); }
 }
 
 init();

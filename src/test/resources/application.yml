@@ -35,6 +35,15 @@ asset:
     floor: 0.5
     decrement: 0.15
 
+# 异常整改线测试：留证照片落在 target；期限收紧到小时级便于测逾期
+rectify:
+  storage-root: ./target/test-rectify-photos
+  sla:
+    deadline-hours: 72
+    grace-hours: 48
+    scan-interval-ms: 3600000
+    scan-initial-delay-ms: 3600000
+
 logging:
   level:
     com.evops: WARN

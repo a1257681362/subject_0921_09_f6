@@ -29,6 +29,9 @@ public class ShiroConfig {
         // F5：销售（只能看/操作自己名下客户，只能提交额度申请）
         realm.addAccount("sales1", "sales1", "sales");
         realm.addAccount("sales2", "sales2", "sales");
+        // F6：巡查员（现场上报）/ 维护商（接单处理回传）；复勘与派单用 demo、bootstrap
+        realm.addAccount("inspector1", "inspector1", "inspector");
+        realm.addAccount("vendor1", "vendor1", "vendor");
         return realm;
     }
 

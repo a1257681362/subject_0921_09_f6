@@ -20,7 +20,7 @@
 - **外部回执**：挂回原单据；回执指向对冲单时自动回溯到根单。
 - **月度档期周历**：`/api/ledger/calendar?period=yyyy-MM` 一眼看哪块屏哪周空着。
 
-账号：演示账号 `demo / demo`，骨架账号 `bootstrap / bootstrap`（均为财务/系统视角，看全部客户、可审批）；F5 销售账号 `sales1 / sales1`、`sales2 / sales2`（只见名下客户），财务账号 `finance1 / finance1`。
+账号：演示账号 `demo / demo`，骨架账号 `bootstrap / bootstrap`（均为财务/系统视角，看全部客户、可审批）；F5 销售账号 `sales1 / sales1`、`sales2 / sales2`（只见名下客户），财务账号 `finance1 / finance1`；F6 巡查员账号 `inspector1 / inspector1`（现场上报、复勘）、维护商账号 `vendor1 / vendor1`（接单处理回传），派单/查全部用 demo、bootstrap。
 
 ## F2：素材流水与多规格转档（f2-asset-transcode-1）
 
@@ -84,6 +84,23 @@
 
 信用额度模块：客户档案（额度、在额占用、可用额度）；信用额度版本（建档/调额/冻结/解冻，前后值、申请审批留痕）；信用额度状态（`ACTIVE 在档 / FROZEN 冻结`）。
 
+## F6：设施异常上报与整改销项（f6-rectify-1）
+
+上周三大风三块牌面翘边，巡查员电话打了一圈，事后查不到谁报的、怎么处理的——异常上报整改收进 evops-base：巡查员现场就能提交异常，系统生成整改单派给维护商，处理完回传，**复勘通过才销项**；拖过期限自动逐级往上抄送；照片在单子关闭前不许删；翻点位档案能看到它的历史异常。
+
+业务口径：
+
+- **巡查员现场提交异常**：点位、异常类型必填（`EDGE_LIFT 牌面翘边 / PANEL_DAMAGE 画面破损 / LIGHT_FAULT 亮灯故障 / STRUCTURE_RISK 结构隐患 / OTHER 其他`），现场情况、严重程度选填；**照片可传可不传**（0~N 张），上报即落留证（SHA-256 指纹、落盘、库里存相对路径）。整改单号 `RC+序列` 全局唯一。
+- **系统生成整改单派给维护商**：上报即建单进 `REPORTED 已上报待派单`，派单必须落到具体维护商（`DISPATCHED 已派单待处理`）。
+- **处理完回传**：维护商回传必须写处理说明，整改后照片同样可传可不传，回传后进 `RETURNED 已回传待复勘`。
+- **复勘通过才销项**：复勘通过是唯一销项路径（`CLOSED`，关闭即冻结，不能再派单/回传）；复勘驳回**必须写不通过原因**，单子进 `REVIEW_REJECTED 复勘驳回待重处`，维护商返工后可再次回传、再复勘。
+- **异常上报版本**：上报记 v1，派单/回传/复勘（含驳回后返工再回传）每处置一次推进一版；每个动作写一条只追加事件——动作前后状态、经手人、发生时刻、**当时主档 JSON 快照**全留。
+- **异常上报状态**：`REPORTED 已上报待派单 / DISPATCHED 已派单待处理 / RETURNED 已回传待复勘 / REVIEW_REJECTED 复勘驳回待重处 / CLOSED 复勘通过已销项`；另有逾期标记 `ON_TIME / OVERDUE`（只上不下）与抄送层级 0/1/2。
+- **拖过期限自动往上抄送**：上报时按 SLA 落死处理期限（默认 72 小时，`rectify.sla.*` 可配）；定时扫描（默认每 5 分钟）发现过期限未销项，**自动抄送维护商主管**（层级 1、标逾期）；再过宽限期（默认 48 小时）仍未销项，**再抄送运营负责人**（层级 2）。每层只抄送一次，抄送记录只追加；抄送不动业务状态，已销项单不再抄送。也可 `GET /api/rectifies/overdue/scan` 手动触发。
+- **照片在单子关闭前不许删**：系统**不提供照片删除接口**，未销项单调归档直接拒；照片行只有 `KEPT 在单留证 / ARCHIVED 已归档`，关闭默认也不删（留证完整），仅在销项后由显式归档动作按留存策略物理清理并置 `ARCHIVED`、写一条归档事件。
+- **点位历史异常**：`GET /api/rectifies/sites/{siteNo}/history` 翻该点位全部异常（含已销项），新的在前；整改单上固化点位编号与商圈快照。
+- 现场照片与整改回传照片分阶段（`REPORT / RETURN`）留档，可下载/内联查看供复勘核对。
+
 ## 接口一览（均在 /api 下，除 health/login 外需登录）
 
 | 动作 | 接口 |
@@ -111,16 +128,20 @@
 | 额度变更：申请 / 待审批 / 通过 / 驳回 | `POST /api/credit/customers/{customerNo}/applications`、`GET /api/credit/limit-versions/pending`、`POST /api/credit/limit-versions/{id}/approve`、`POST .../reject` |
 | 回款登记 / 翻查 / 详情 / 按单核销 | `POST /api/credit/payments`、`GET /api/credit/payments?customerNo=&from=&to=`、`GET /api/credit/payments/{paymentNo}`、`POST /api/credit/write-offs` |
 | 占用应收明细 / 月末占用报表 / 导出 CSV | `GET /api/credit/occupations?customerNo=&period=&status=&settleStatus=`、`GET /api/credit/reports/occupation?period=yyyy-MM`、`GET /api/credit/reports/occupation/export?period=` |
+| 现场异常上报（multipart：点位/类型必填，photos 可选） | `POST /api/rectifies` |
+| 异常单翻查 / 全档（照片+事件+抄送）/ 点位历史异常 | `GET /api/rectifies?siteNo=&status=&rectifyNo=&overdueOnly=`、`GET /api/rectifies/{rectifyNo}`、`GET /api/rectifies/sites/{siteNo}/history` |
+| 派单 / 处理回传（multipart，photos 可选）/ 复勘通过 / 复勘驳回 | `POST /api/rectifies/{rectifyNo}/dispatch`、`/return`、`/review-pass`、`/review-reject` |
+| 逾期手动扫描 / 留证照片查看 / 销项后归档照片 | `GET /api/rectifies/overdue/scan`、`GET /api/rectifies/photos/{photoId}/download?inline=`、`POST /api/rectifies/{rectifyNo}/archive-photos` |
 
 授信上刊仍走上刊接口 `POST /api/orders`，请求体带 `quoteNo`（引用已提交报价单）即为授信单；落架/对冲接口不变，撤刊即释放额度。
 
-演示界面：启动后浏览器打开根路径 `/`（周例会演示用，十个页签覆盖全流程）。
+演示界面：启动后浏览器打开根路径 `/`（周例会演示用，十一个页签覆盖全流程）。
 
 ## 启动
 
 1. 执行 `mvn -q -DskipTests compile` 验证骨架构建。
 2. 执行 `mvn spring-boot:run` 启动应用；Spring Boot 会自动执行 `src/main/resources/schema.sql`。
 3. H2 数据文件默认写入工作区 `data/evops`。如需修改路径，编辑 `application.yml` 中的 `jdbc:h2:file:` 连接串。
-4. 验证：`mvn test`（11 项底账口径测试 + 7 项素材转档测试 + 8 项坐标建档测试 + 13 项年度刊例计价测试 + 13 项客户授信回款测试，独立内存 H2）。
+4. 验证：`mvn test`（11 项底账口径测试 + 7 项素材转档测试 + 8 项坐标建档测试 + 13 项年度刊例计价测试 + 13 项客户授信回款测试 + 10 项异常上报整改测试，独立内存 H2）。
 
 表结构交付副本：`docs/schema/evops.sql`（容器内根目录 `../../docs/schema` 不可写，交付副本置于工作区内），应与 `src/main/resources/schema.sql` 保持一致。
