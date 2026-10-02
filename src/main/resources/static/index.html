@@ -80,6 +80,7 @@
     <div class="tab" data-tab="geo">⑧ 坐标建档与捞点</div>
     <div class="tab" data-tab="rate">⑨ 年度刊例与报价</div>
     <div class="tab" data-tab="credit">⑩ 客户授信与回款</div>
+    <div class="tab" data-tab="rectify">⑪ 异常上报整改</div>
   </div>
 
   <!-- 点位挂牌 -->
@@ -432,6 +433,74 @@
     </div>
     <table id="occupationTable"></table>
   </div>
+
+  <div class="panel" id="panel-rectify">
+    <h3>巡查现场上报异常（点位、类型必填，照片可传可不传）</h3>
+    <div class="grid">
+      <div><label>点位编号 *</label><input id="rfSiteNo" placeholder="先在①挂牌的点位"></div>
+      <div><label>异常类型 *</label><select id="rfType"></select></div>
+      <div class="span2"><label>异常情况（哪块牌面、翘边数量）</label><input id="rfDesc" placeholder="上周三大风，三块牌面翘边"></div>
+      <div><label>上报人（留空取登录人）</label><input id="rfReporter"></div>
+      <div><label>现场照片（可不选，可多选）</label><input id="rfPhotos" type="file" accept="image/*" multiple></div>
+      <div style="align-self:end"><button onclick="rfReport()">现场提交异常</button></div>
+    </div>
+
+    <h3>整改单翻查 / 处理</h3>
+    <div class="grid">
+      <div><label>状态</label><select id="rfQStatus">
+        <option value="">全部</option>
+        <option value="REPORTED">已上报待派单</option>
+        <option value="DISPATCHED">已派单整改中</option>
+        <option value="REPAIRED">已回传待复勘</option>
+        <option value="CLOSED">已销项</option>
+      </select></div>
+      <div><label>点位编号</label><input id="rfQSite"></div>
+      <div><label>异常类型</label><select id="rfQType"></select></div>
+      <div><label>关键字（单号/点位）</label><input id="rfQKeyword"></div>
+      <div style="align-self:end;display:flex;gap:8px">
+        <button class="gray" onclick="rfLoad()">翻查</button>
+        <button class="gray" onclick="rfScan()">立即扫描超期抄送</button>
+      </div>
+    </div>
+    <table id="rfTable"></table>
+
+    <h3>操作区（从上方列表点「选」填单号，或手输）</h3>
+    <div class="grid">
+      <div><label>整改单号 *</label><input id="rfNo"></div>
+    </div>
+    <div class="grid">
+      <div><label>承派维护商 *（派单）</label><input id="rfVendor" placeholder="顺风维护商"></div>
+      <div><label>联系方式</label><input id="rfVendorContact"></div>
+      <div><label>期限小时（留空走默认 48h）</label><input id="rfDeadlineH" type="number" min="1"></div>
+      <div style="align-self:end"><button onclick="rfDispatch()">系统派单</button></div>
+    </div>
+    <div class="grid">
+      <div class="span2"><label>处理结果 *（维护商回传）</label><input id="rfRepairResult" placeholder="更换翘边牌面、加固压条"></div>
+      <div><label>整改后照片（可多选）</label><input id="rfRepairPhotos" type="file" accept="image/*" multiple></div>
+      <div style="align-self:end"><button onclick="rfRepair()">维护商回传</button></div>
+    </div>
+    <div class="grid">
+      <div class="span2"><label>复勘意见（驳回必填原因）</label><input id="rfComment" placeholder="现场复勘合格 / 南侧第三块仍翘边，返工"></div>
+      <div style="align-self:end;display:flex;gap:8px">
+        <button onclick="rfPass()">复勘通过销项</button>
+        <button class="warn" onclick="rfReject()">不通过退回重处理</button>
+      </div>
+    </div>
+
+    <h3>单据档案（事件版本留底 · 留证照片 · 超期抄送）</h3>
+    <div class="actions">
+      <button class="gray" onclick="rfDetail()">查档案</button>
+      <span class="muted">照片在销项关闭前不许删；关闭后删除也留事件。</span>
+    </div>
+    <div id="rfDetail"></div>
+
+    <h3>点位历史异常</h3>
+    <div class="grid">
+      <div><label>点位编号 *</label><input id="rfHistSite"></div>
+      <div style="align-self:end"><button class="gray" onclick="rfHistory()">翻该点位历史异常</button></div>
+    </div>
+    <table id="rfHistTable"></table>
+  </div>
 </div>
 
 <script>
@@ -480,7 +549,7 @@ async function doLogin() {
 async function init() {
   // header 占位（登录后填充）
   document.body.insertAdjacentHTML('afterbegin',
-    '<header><h1>户外广告点位与上刊底账 <span class="muted" style="color:#c8d4e6">EVOPS f1·f2·f3·f4</span></h1><span class="who"></span></header>');
+    '<header><h1>户外广告点位与上刊底账 <span class="muted" style="color:#c8d4e6">EVOPS f1·f2·f3·f4·f5·f6</span></h1><span class="who"></span></header>');
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
     document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
     document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
@@ -488,6 +557,7 @@ async function init() {
     document.getElementById('panel-' + t.dataset.tab).classList.add('active');
     if (t.dataset.tab === 'rate') { loadRateCards(); }
     if (t.dataset.tab === 'credit') { loadCustomers(); loadPending(); }
+    if (t.dataset.tab === 'rectify') { rfLoadTypes(); rfLoad(); }
   });
   document.getElementById('calPeriod').value = new Date().toISOString().slice(0, 7);
   try { const me = await call('GET', '/me'); showApp(me.username); loadSites(); loadSpecs(); } catch (e) { showLogin(); }
@@ -1212,6 +1282,163 @@ function exportOccupation(){
   const p=val('ocPeriod');
   if(!p){ toast('请填归属月 yyyy-MM'); return; }
   window.open('/api/credit/reports/occupation/export?period='+encodeURIComponent(p),'_blank');
+}
+
+// ===== ⑪ 异常上报整改 =====
+function rfStatusTag(s){
+  return { REPORTED:'<span class="tag pending">已上报待派单</span>',
+    DISPATCHED:'<span class="tag processing">已派单整改中</span>',
+    REPAIRED:'<span class="tag hung">已回传待复勘</span>',
+    CLOSED:'<span class="tag success">已销项</span>' }[s] || esc(s);
+}
+async function callForm(url, formData){
+  const resp = await fetch(API + url, { method:'POST', body: formData });
+  let data = null;
+  try { data = await resp.json(); } catch(e) {}
+  if (resp.status === 401) { showLogin(); throw new Error('未登录'); }
+  if (!data || !data.success) throw new Error((data && data.message) || ('请求失败 ' + resp.status));
+  return data.data;
+}
+function rfFillFiles(fd, inputId){
+  const files = document.getElementById(inputId).files;
+  for (const f of files) fd.append('photos', f);
+}
+async function rfLoadTypes(){
+  try{
+    const types = await call('GET','/rectify/types');
+    const opts = '<option value="">请选择</option>' + types.map(t=>`<option value="${t.code}">${esc(t.label)}</option>`).join('');
+    document.getElementById('rfType').innerHTML = opts;
+    document.getElementById('rfQType').innerHTML = '<option value="">全部</option>'
+      + types.map(t=>`<option value="${t.code}">${esc(t.label)}</option>`).join('');
+  }catch(e){ toast(e.message); }
+}
+async function rfReport(){
+  if(!val('rfSiteNo') || !val('rfType')){ toast('点位编号和异常类型必填'); return; }
+  const fd = new FormData();
+  fd.append('siteNo', val('rfSiteNo')); fd.append('abnormalType', val('rfType'));
+  if(val('rfDesc')) fd.append('abnormalDesc', val('rfDesc'));
+  if(val('rfReporter')) fd.append('reporterName', val('rfReporter'));
+  rfFillFiles(fd, 'rfPhotos');
+  try{
+    const d = await callForm('/rectify/orders', fd);
+    toast('异常已上报，整改单 ' + d.rectifyNo + '，状态：已上报待派单', true);
+    document.getElementById('rfNo').value = d.rectifyNo;
+    ['rfSiteNo','rfDesc','rfReporter'].forEach(i=>document.getElementById(i).value='');
+    document.getElementById('rfPhotos').value='';
+    rfLoad();
+  }catch(e){ toast(e.message); }
+}
+async function rfLoad(){
+  try{
+    const q='?status='+encodeURIComponent(val('rfQStatus')||'')+'&siteNo='+encodeURIComponent(val('rfQSite')||'')
+      +'&type='+encodeURIComponent(val('rfQType')||'')+'&keyword='+encodeURIComponent(val('rfQKeyword')||'');
+    const list=await call('GET','/rectify/orders'+q);
+    document.getElementById('rfTable').innerHTML=
+      '<tr><th>单号</th><th>点位</th><th>商圈</th><th>类型</th><th>状态</th><th>版本</th><th>上报人</th><th>维护商</th><th>期限</th><th>抄送级</th><th></th></tr>'
+      + list.map(o=>`<tr class="${o.status==='CLOSED'?'closed':''}">
+        <td>${esc(o.rectifyNo)}</td><td>${esc(o.siteNo)}</td><td>${esc(o.businessDistrict)}</td>
+        <td>${esc(rfTypeLabel(o.abnormalType))}</td><td>${rfStatusTag(o.status)}</td><td>v${o.versionNo}</td>
+        <td>${esc(o.reporterName)}</td><td>${esc(o.vendorName)||''}</td>
+        <td>${o.deadline ? esc(o.deadline.replace('T',' ')) : ''}</td><td>${o.ccLevel>0 ? '<span class="tag failed">L'+o.ccLevel+'</span>' : ''}</td>
+        <td><button class="sm gray" onclick="rfPick('${esc(o.rectifyNo)}')">选</button></td></tr>`).join('')
+      || '<tr><td class="muted">没有整改单</td></tr>';
+  }catch(e){ toast(e.message); }
+}
+function rfTypeLabel(code){
+  return { PANEL_LIFT:'牌面翘边', PANEL_DAMAGE:'牌面破损', LIGHT_FAULT:'亮灯故障',
+    STRUCTURE_RISK:'结构隐患', OTHER:'其他异常' }[code] || code;
+}
+function rfPick(no){ document.getElementById('rfNo').value=no; toast('已填入选中单号 '+no,true); rfDetail(); }
+async function rfDispatch(){
+  if(!val('rfNo')){ toast('请填整改单号'); return; }
+  if(!val('rfVendor')){ toast('请填承派维护商'); return; }
+  try{
+    const d=await call('POST',`/rectify/orders/${encodeURIComponent(val('rfNo'))}/dispatch`,{
+      vendorName:val('rfVendor'), vendorContact:val('rfVendorContact'),
+      deadlineHours:val('rfDeadlineH')?Number(val('rfDeadlineH')):undefined });
+    toast('已派单给 '+d.vendorName+'，整改期限截止 '+String(d.deadline).replace('T',' '),true); rfLoad();
+  }catch(e){ toast(e.message); }
+}
+async function rfRepair(){
+  if(!val('rfNo')){ toast('请填整改单号'); return; }
+  if(!val('rfRepairResult')){ toast('维护商回传必须填处理结果'); return; }
+  const fd=new FormData();
+  fd.append('repairResult',val('rfRepairResult'));
+  rfFillFiles(fd,'rfRepairPhotos');
+  try{
+    await callForm(`/rectify/orders/${encodeURIComponent(val('rfNo'))}/repair`,fd);
+    toast('处理结果已回传，等待复勘',true);
+    document.getElementById('rfRepairResult').value=''; document.getElementById('rfRepairPhotos').value='';
+    rfLoad();
+  }catch(e){ toast(e.message); }
+}
+async function rfPass(){
+  if(!val('rfNo')){ toast('请填整改单号'); return; }
+  try{
+    await call('POST',`/rectify/orders/${encodeURIComponent(val('rfNo'))}/reinspect/pass`,
+      { comment:val('rfComment')||'' });
+    toast('复勘通过，已销项关闭（照片留证已冻结归档）',true); rfLoad(); rfDetail();
+  }catch(e){ toast(e.message); }
+}
+async function rfReject(){
+  if(!val('rfNo')){ toast('请填整改单号'); return; }
+  if(!val('rfComment')){ toast('驳回必须填不通过原因'); return; }
+  try{
+    const d=await call('POST',`/rectify/orders/${encodeURIComponent(val('rfNo'))}/reinspect/reject`,
+      { comment:val('rfComment') });
+    toast('已退回维护商重处理，返工期限截止 '+String(d.deadline).replace('T',' '),true);
+    document.getElementById('rfComment').value=''; rfLoad();
+  }catch(e){ toast(e.message); }
+}
+async function rfScan(){
+  try{ const d=await call('POST','/rectify/escalations/scan');
+    toast('扫描完成，本次新抄送 '+d.escalated+' 条', d.escalated>=0); rfLoad();
+  }catch(e){ toast(e.message); }
+}
+async function rfHistory(){
+  if(!val('rfHistSite')){ toast('请填点位编号'); return; }
+  try{
+    const list=await call('GET','/rectify/sites/'+encodeURIComponent(val('rfHistSite'))+'/history');
+    document.getElementById('rfHistTable').innerHTML=
+      '<tr><th>单号</th><th>类型</th><th>状态</th><th>版本</th><th>上报时间</th><th>上报人</th><th>维护商</th><th>销项时间</th></tr>'
+      + list.map(o=>`<tr class="${o.status==='CLOSED'?'closed':''}">
+        <td><a href="javascript:void(0)" onclick="rfPick('${esc(o.rectifyNo)}')">${esc(o.rectifyNo)}</a></td>
+        <td>${esc(rfTypeLabel(o.abnormalType))}</td><td>${rfStatusTag(o.status)}</td><td>v${o.versionNo}</td>
+        <td>${esc(String(o.reportTime).replace('T',' '))}</td><td>${esc(o.reporterName)}</td>
+        <td>${esc(o.vendorName)||''}</td><td>${o.closedTime?esc(String(o.closedTime).replace('T',' ')):''}</td></tr>`).join('')
+      || '<tr><td class="muted">该点位没有历史异常</td></tr>';
+  }catch(e){ toast(e.message); }
+}
+async function rfDetail(){
+  if(!val('rfNo')){ toast('请填整改单号'); return; }
+  try{
+    const d=await call('GET','/rectify/orders/'+encodeURIComponent(val('rfNo')));
+    const o=d.order;
+    const head=`<p>单号 <b>${esc(o.rectifyNo)}</b> · 点位 ${esc(o.siteNo)} · ${esc(rfTypeLabel(o.abnormalType))}
+      · ${rfStatusTag(o.status)} · 版本 v${o.versionNo} · 抄送级 L${o.ccLevel}</p>
+      <p class="muted">上报：${esc(o.reporterName)} ${esc(String(o.reportTime).replace('T',' '))}
+      ｜派单：${esc(o.vendorName)||'-'} ${o.dispatchTime?esc(String(o.dispatchTime).replace('T',' ')):''} 期限 ${o.deadline?esc(String(o.deadline).replace('T',' ')):'-'}
+      ｜回传：${o.repairTime?esc(String(o.repairTime).replace('T',' ')):'-'}｜复勘：${o.reinspectTime?esc(String(o.reinspectTime).replace('T',' ')):'-'}</p>`;
+    const photos=(d.photos||[]).map(p=>`<li>[${p.phase==='REPORT'?'现场上报':'整改回传'}]
+        <a href="/api/rectify/photos/${p.id}/download" target="_blank">${esc(p.fileName)}</a>
+        <span class="muted">（${(p.fileSize/1024).toFixed(1)}KB，${esc(p.uploaderName)} ${esc(String(p.uploadTime).replace('T',' '))}）</span>
+        ${o.status==='CLOSED'?`<button class="sm danger" onclick="rfDeletePhoto(${p.id})">删（已关闭，留事件）</button>`:'<span class="muted">关闭前不可删</span>'}
+      </li>`).join('') || '<li class="muted">无照片（上报照片本就可传可不传）</li>';
+    const ccs=(d.ccs||[]).map(c=>`<li>L${c.ccLevel} → ${esc(c.ccTarget)}：${esc(c.reason)} <span class="muted">${esc(String(c.triggerTime).replace('T',' '))}</span></li>`).join('')
+      || '<li class="muted">未超期抄送</li>';
+    const events=(d.events||[]).map(e=>`<li><b>${esc(rfEventLabel(e.eventType))}</b> v${e.versionNo} · ${esc(e.operatorName)}
+      · ${esc(String(e.eventTime).replace('T',' '))}<br><span class="muted">${esc(e.detail)}</span></li>`).join('');
+    document.getElementById('rfDetail').innerHTML=`${head}
+      <p><b>留证照片（${(d.photos||[]).length}）</b></p><ul>${photos}</ul>
+      <p><b>超期抄送（${(d.ccs||[]).length}）</b></p><ul>${ccs}</ul>
+      <p><b>事件版本留底（${(d.events||[]).length}）</b></p><ul style="font-size:12px">${events}</ul>`;
+  }catch(e){ toast(e.message); }
+}
+function rfEventLabel(t){ return { REPORT:'现场上报', DISPATCH:'派单', REPAIR:'回传',
+  REINSPECT_PASS:'复勘通过销项', REINSPECT_REJECT:'复勘驳回返工', ESCALATE:'超期抄送', PHOTO_DELETE:'关闭后删照片' }[t]||t; }
+async function rfDeletePhoto(id){
+  try{ await call('POST','/rectify/photos/'+id+'/delete'); toast('照片已删除，已留 PHOTO_DELETE 事件',true); rfDetail(); }
+  catch(e){ toast(e.message); }
 }
 
 init();

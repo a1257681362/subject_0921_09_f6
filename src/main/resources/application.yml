@@ -57,6 +57,23 @@ rate-card:
   # 默认税率：建刊例版本时未单独指定税率用它（0.06 = 6%）；挂牌单价为未税价
   default-tax-rate: 0.06
 
+# F6 异常上报整改
+rectify:
+  # 留证照片落盘根目录（单子关闭前不许删）
+  storage-root: ./data/rectify-photos
+  # 整改期限（小时）：派单时刻 + 它 = 期限；复勘驳回返工重新计时
+  deadline-hours: 48
+  # 超期抄送扫描间隔（毫秒，默认 10 分钟；启动 30 秒后先扫一轮）
+  escalation-scan-delay-ms: 600000
+  # 逐级抄送阶梯：after-hours = 超过整改期限后的小时数（0 = 期限一过即抄送本级）
+  escalation:
+    - after-hours: 0
+      target: 维护主管
+    - after-hours: 48
+      target: 运营经理
+    - after-hours: 120
+      target: 分管总监
+
 mybatis-plus:
   mapper-locations: classpath*:mapper/**/*.xml
   type-aliases-package: com.evops

@@ -35,6 +35,19 @@ asset:
     floor: 0.5
     decrement: 0.15
 
+# F6 异常整改测试：照片落 target；期限 1 小时便于构造超期
+rectify:
+  storage-root: ./target/test-rectify-photos
+  deadline-hours: 1
+  escalation-scan-delay-ms: 3600000
+  escalation:
+    - after-hours: 0
+      target: 维护主管
+    - after-hours: 48
+      target: 运营经理
+    - after-hours: 120
+      target: 分管总监
+
 logging:
   level:
     com.evops: WARN

@@ -20,7 +20,7 @@
 - **外部回执**：挂回原单据；回执指向对冲单时自动回溯到根单。
 - **月度档期周历**：`/api/ledger/calendar?period=yyyy-MM` 一眼看哪块屏哪周空着。
 
-账号：演示账号 `demo / demo`，骨架账号 `bootstrap / bootstrap`（均为财务/系统视角，看全部客户、可审批）；F5 销售账号 `sales1 / sales1`、`sales2 / sales2`（只见名下客户），财务账号 `finance1 / finance1`。
+账号：演示账号 `demo / demo`，骨架账号 `bootstrap / bootstrap`（均为财务/系统视角，看全部客户、可审批）；F5 销售账号 `sales1 / sales1`、`sales2 / sales2`（只见名下客户），财务账号 `finance1 / finance1`；F6 巡查账号 `inspector1 / inspector1`（现场上报）、维护商账号 `vendor1 / vendor1`（回传处理结果），派单与复勘用 `demo / demo`。
 
 ## F2：素材流水与多规格转档（f2-asset-transcode-1）
 
@@ -84,6 +84,24 @@
 
 信用额度模块：客户档案（额度、在额占用、可用额度）；信用额度版本（建档/调额/冻结/解冻，前后值、申请审批留痕）；信用额度状态（`ACTIVE 在档 / FROZEN 冻结`）。
 
+## F6：异常上报与整改销项（f6-rectify-1）
+
+上周三大风三块牌面翘边，巡查员电话打了一圈、事后查不到谁报的、怎么处理的——异常处置全链路落进 evops-base：巡查员现场就能报，系统派整改单给维护商，处理完回传，复勘通过才销项；拖过期限自动逐级往上抄送，照片在销项前一张都不许删。
+
+业务口径：
+
+- **巡查现场就能提交异常**：点位、异常类型（`PANEL_LIFT 牌面翘边 / PANEL_DAMAGE 牌面破损 / LIGHT_FAULT 亮灯故障 / STRUCTURE_RISK 结构隐患 / OTHER 其他`）必填，点位必须已挂牌；异常说明可填，**照片可传可不传、可多张**。上报即生成整改单，单号 `RC+序列` 全局唯一，谁报的、什么时刻、在哪个点位，一翻就有。
+- **系统派单给整改期限**：整改单派给维护商（承派商 + 联系方式），派单时刻落 `dispatch_time`，按配置 `rectify.deadline-hours`（默认 48 小时）算 `deadline`，可临时覆盖。
+- **维护商处理完回传**：处理结果（怎么处理的、换了什么件）必填，整改后照片可传可不传；回传后单据变「已回传待复勘」。
+- **复勘通过才销项，不通过退回重处理**：驳回必须填原因，单据退回「已派单整改中」并**重新给整改期限**（返工也计时，避免驳回单绕过超期抄送）；通过才 `CLOSED 已销项`。
+- **异常上报状态**：`REPORTED 已上报待派单 / DISPATCHED 已派单整改中 / REPAIRED 已回传待复勘 / CLOSED 已销项`；**关闭即冻结**，销项后不能再派单、回传、复勘、补照片。
+- **异常上报版本**：每流转一次 `version_no +1`，每步写只追加事件（经手人、时刻、详情、**事件后单据快照 JSON**）：上报/派单/回传/复勘通过/复勘驳回/超期抄送/关闭后删照片，全程可翻。
+- **拖过期限自动往上抄送**：定时任务（默认每 10 分钟，启动 30 秒先扫一轮）扫 `DISPATCHED 且当前时刻 > deadline` 的单，按 `rectify.escalation` 阶梯逐级抄送（默认：期限一过→维护主管，超期 48h→运营经理，超期 120h→分管总监）；**每级只抄一次**，`(整改单, 抄送级别)` 唯一约束 + 落库级别双重幂等，重复扫描、多节点都不重发，只往更高级别走；回传后立即退出抄送。
+- **照片在单子关闭前不许删，留证要完整**：服务层与接口双拦，未销项删除直接拒；销项关闭后允许清理，但**删一条写一条 `PHOTO_DELETE` 事件**（谁删的、删的哪阶段哪张）。照片落盘 `rectify.storage-root`（默认 `./data/rectify-photos`，按 单号/阶段/时刻-指纹 存），SHA-256 指纹随档（不去重，每次上传都是独立证据），库里存相对路径。
+- **翻点位档案看得到历史异常**：`GET /api/rectify/sites/{siteNo}/history` 列该点位全部整改单（含已销项），时间倒序；整改单也支持按状态/点位/类型/关键字翻查，详情带事件版本、照片、抄送记录全量档案。
+
+异常上报模块：异常整改单（点位、类型、上报人、维护商、期限、复勘）；异常上报版本（上报/派单/回传/复勘/抄送逐事件 + 快照留底）；异常上报状态（`REPORTED / DISPATCHED / REPAIRED / CLOSED`）。
+
 ## 接口一览（均在 /api 下，除 health/login 外需登录）
 
 | 动作 | 接口 |
@@ -111,16 +129,22 @@
 | 额度变更：申请 / 待审批 / 通过 / 驳回 | `POST /api/credit/customers/{customerNo}/applications`、`GET /api/credit/limit-versions/pending`、`POST /api/credit/limit-versions/{id}/approve`、`POST .../reject` |
 | 回款登记 / 翻查 / 详情 / 按单核销 | `POST /api/credit/payments`、`GET /api/credit/payments?customerNo=&from=&to=`、`GET /api/credit/payments/{paymentNo}`、`POST /api/credit/write-offs` |
 | 占用应收明细 / 月末占用报表 / 导出 CSV | `GET /api/credit/occupations?customerNo=&period=&status=&settleStatus=`、`GET /api/credit/reports/occupation?period=yyyy-MM`、`GET /api/credit/reports/occupation/export?period=` |
+| 异常类型字典 / 现场上报（multipart，照片可选） | `GET /api/rectify/types`、`POST /api/rectify/orders` |
+| 整改单翻查 / 详情（事件+照片+抄送） | `GET /api/rectify/orders?status=&siteNo=&type=&keyword=`、`GET /api/rectify/orders/{rectifyNo}` |
+| 派单 / 维护商回传（multipart，照片可选） | `POST /api/rectify/orders/{rectifyNo}/dispatch`、`POST /api/rectify/orders/{rectifyNo}/repair` |
+| 复勘通过销项 / 驳回返工 | `POST /api/rectify/orders/{rectifyNo}/reinspect/pass`、`POST /api/rectify/orders/{rectifyNo}/reinspect/reject` |
+| 补传照片 / 关闭后删照片（留事件） / 下载 | `POST /api/rectify/orders/{rectifyNo}/photos`、`POST /api/rectify/photos/{photoId}/delete`、`GET /api/rectify/photos/{photoId}/download` |
+| 点位历史异常 / 立即扫描超期抄送 | `GET /api/rectify/sites/{siteNo}/history`、`POST /api/rectify/escalations/scan` |
 
 授信上刊仍走上刊接口 `POST /api/orders`，请求体带 `quoteNo`（引用已提交报价单）即为授信单；落架/对冲接口不变，撤刊即释放额度。
 
-演示界面：启动后浏览器打开根路径 `/`（周例会演示用，十个页签覆盖全流程）。
+演示界面：启动后浏览器打开根路径 `/`（周例会演示用，十一个页签覆盖全流程）。
 
 ## 启动
 
 1. 执行 `mvn -q -DskipTests compile` 验证骨架构建。
 2. 执行 `mvn spring-boot:run` 启动应用；Spring Boot 会自动执行 `src/main/resources/schema.sql`。
 3. H2 数据文件默认写入工作区 `data/evops`。如需修改路径，编辑 `application.yml` 中的 `jdbc:h2:file:` 连接串。
-4. 验证：`mvn test`（11 项底账口径测试 + 7 项素材转档测试 + 8 项坐标建档测试 + 13 项年度刊例计价测试 + 13 项客户授信回款测试，独立内存 H2）。
+4. 验证：`mvn test`（11 项底账口径测试 + 7 项素材转档测试 + 8 项坐标建档测试 + 13 项年度刊例计价测试 + 13 项客户授信回款测试 + 10 项异常上报整改测试，独立内存 H2）。
 
 表结构交付副本：`docs/schema/evops.sql`（容器内根目录 `../../docs/schema` 不可写，交付副本置于工作区内），应与 `src/main/resources/schema.sql` 保持一致。
